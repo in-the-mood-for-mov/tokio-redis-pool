@@ -1,0 +1,19 @@
+[package]
+name = "tokio-redis-pool"
+version = "0.1.0"
+license = "MIT"
+authors = ["Simon Génier <1782845+animalsiknow@users.noreply.github.com>"]
+edition = "2018"
+description = "A Redis connection pool for the Tokio ecosystem."
+repository = "https://github.com/animalsiknow/tokio-redis-pool"
+documentation = "https://docs.rs/tokio-redis-pool"
+keywords = ["tokio", "pool", "redis"]
+categories = ["asynchronous"]
+
+[dependencies]
+futures = "0.1.27"
+redis = "0.10.0"
+tokio-resource-pool = "0.2.0"
+
+[dev-dependencies]
+tokio = "0.1.20"
