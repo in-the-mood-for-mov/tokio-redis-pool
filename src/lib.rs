@@ -2,6 +2,7 @@ use futures::Future;
 use redis::r#async::ConnectionLike;
 use redis::{IntoConnectionInfo, RedisError, RedisResult};
 use tokio_resource_pool::{CheckOut, Manage, Pool};
+pub use tokio_resource_pool::CheckOutFuture;
 
 /// Manages the lifecycle of connections to a single Redis server.
 pub struct RedisManager {
