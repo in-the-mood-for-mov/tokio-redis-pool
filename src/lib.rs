@@ -1,8 +1,8 @@
-use futures::Future;
-use redis::r#async::ConnectionLike;
-use redis::{IntoConnectionInfo, RedisError, RedisResult};
-use tokio_resource_pool::{CheckOut, Manage, Pool};
+use futures::{try_ready, Async, Future, Poll};
+use redis::r#async::{Connection, ConnectionLike};
+use redis::{IntoConnectionInfo, RedisError, RedisFuture, RedisResult};
 pub use tokio_resource_pool::CheckOutFuture;
+use tokio_resource_pool::{CheckOut, Manage, Pool, Status};
 
 /// Manages the lifecycle of connections to a single Redis server.
 pub struct RedisManager {
@@ -29,16 +29,27 @@ impl RedisManager {
 }
 
 impl Manage for RedisManager {
-    type Resource = redis::r#async::Connection;
+    type Resource = Connection;
 
     type CheckOut = RedisCheckOut;
 
     type Error = RedisError;
 
-    type Future = Box<dyn Future<Item = Self::Resource, Error = Self::Error> + Send>;
+    type CreateFuture = Box<dyn Future<Item = Self::Resource, Error = Self::Error> + Send>;
 
-    fn create(&self) -> Self::Future {
+    fn create(&self) -> Self::CreateFuture {
         Box::new(self.client.get_async_connection())
+    }
+
+    fn status(&self, _: &Self::Resource) -> Status {
+        Status::Valid
+    }
+
+    type RecycleFuture = RecycleFuture;
+
+    fn recycle(&self, connection: Self::Resource) -> Self::RecycleFuture {
+        let inner = redis::cmd("PING").query_async::<_, ()>(connection);
+        RecycleFuture { inner }
     }
 }
 
@@ -75,10 +86,8 @@ impl ConnectionLike for RedisCheckOut {
         self,
         cmd: Vec<u8>,
     ) -> Box<dyn Future<Item = (Self, redis::Value), Error = RedisError> + Send> {
-        Box::new(
-            self.inner
-                .lend(move |connection| connection.req_packed_command(cmd)),
-        )
+        let borrower = move |connection: Connection| connection.req_packed_command(cmd);
+        Box::new(self.inner.lend(borrower))
     }
 
     fn req_packed_commands(
@@ -87,10 +96,9 @@ impl ConnectionLike for RedisCheckOut {
         offset: usize,
         count: usize,
     ) -> Box<dyn Future<Item = (Self, Vec<redis::Value>), Error = RedisError> + Send> {
-        Box::new(
-            self.inner
-                .lend(move |connection| connection.req_packed_commands(cmd, offset, count)),
-        )
+        let borrower =
+            move |connection: Connection| connection.req_packed_commands(cmd, offset, count);
+        Box::new(self.inner.lend(borrower))
     }
 
     fn get_db(&self) -> i64 {
@@ -101,5 +109,20 @@ impl ConnectionLike for RedisCheckOut {
 impl From<CheckOut<RedisManager>> for RedisCheckOut {
     fn from(inner: CheckOut<RedisManager>) -> Self {
         Self { inner }
+    }
+}
+
+pub struct RecycleFuture {
+    inner: RedisFuture<(Connection, ())>,
+}
+
+impl Future for RecycleFuture {
+    type Item = Option<Connection>;
+
+    type Error = RedisError;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        let (connection, ()) = try_ready!(self.inner.poll());
+        Ok(Async::Ready(Some(connection)))
     }
 }
