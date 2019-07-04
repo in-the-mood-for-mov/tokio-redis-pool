@@ -1,6 +1,6 @@
 [package]
 name = "tokio-redis-pool"
-version = "0.2.0"
+version = "0.2.1"
 license = "MIT"
 authors = ["Simon Génier <1782845+animalsiknow@users.noreply.github.com>"]
 edition = "2018"
@@ -13,7 +13,7 @@ categories = ["asynchronous"]
 [dependencies]
 futures = "0.1.28"
 redis = "0.10.0"
-tokio-resource-pool = "0.3.0"
+tokio-resource-pool = "0.3.1"
 
 [dev-dependencies]
 tokio = "0.1.21"
