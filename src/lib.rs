@@ -1,8 +1,8 @@
 use futures::{try_ready, Async, Future, Poll};
-use redis::r#async::{Connection, ConnectionLike};
+use redis::aio::{Connection, ConnectionLike};
 use redis::{IntoConnectionInfo, RedisError, RedisFuture, RedisResult};
 pub use tokio_resource_pool::{Builder, CheckOutFuture};
-use tokio_resource_pool::{CheckOut, Manage, Pool, Status};
+use tokio_resource_pool::{CheckOut, Manage, Pool, RealDependencies, Status};
 
 /// Manages the lifecycle of connections to a single Redis server.
 pub struct RedisManager {
@@ -30,6 +30,8 @@ impl RedisManager {
 
 impl Manage for RedisManager {
     type Resource = Connection;
+
+    type Dependencies = RealDependencies;
 
     type CheckOut = RedisCheckOut;
 
@@ -66,9 +68,9 @@ pub type RedisPool = Pool<RedisManager>;
 /// ```
 /// # use futures::future::Future;
 /// # use redis::RedisResult;
-/// # use tokio_redis_pool::{RedisManager, RedisPool};
+/// # use tokio_redis_pool::{Builder, RedisManager, RedisPool};
 /// # let manager = RedisManager::new("redis://127.0.0.1:6379").unwrap();
-/// # let (pool, _) = RedisPool::new(4, manager);
+/// # let pool = Builder::new().build(4, manager);
 /// tokio::run(
 ///     pool
 ///         .check_out()
@@ -124,5 +126,37 @@ impl Future for RecycleFuture {
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         let (connection, ()) = try_ready!(self.inner.poll());
         Ok(Async::Ready(Some(connection)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Builder, RedisManager};
+    use futures::future::Future;
+
+    #[test]
+    fn checkout_and_read() {
+        let redis_url = "redis://127.0.0.1/";
+        {
+            let mut client = redis::Client::open(redis_url).unwrap();
+            redis::cmd("HSET")
+                .arg("greetings")
+                .arg("english")
+                .arg("hello")
+                .execute(&mut client);
+        }
+
+        let manager = RedisManager::new(redis_url).unwrap();
+        let pool = Builder::new().build(4, manager);
+        let mut runtime = tokio::runtime::Runtime::new().unwrap();
+
+        let result = runtime.block_on(pool.check_out().and_then(|connection| {
+            redis::cmd("HGET")
+                .arg("greetings")
+                .arg("english")
+                .query_async::<_, String>(connection)
+                .map(|(_, v)| v)
+        }));
+        assert_eq!(Ok("hello".to_string()), result);
     }
 }
